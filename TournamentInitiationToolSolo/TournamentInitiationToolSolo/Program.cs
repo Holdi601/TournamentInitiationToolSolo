@@ -23,24 +23,34 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
             discord = new DiscordClient(new DiscordConfiguration
             {
                 Token = Environment.GetEnvironmentVariable("TITS_TOKEN", EnvironmentVariableTarget.User),
-                TokenType = TokenType.Bot
+                TokenType = TokenType.Bot,
+                Intents = DiscordIntents.All
             });
 
             commands = discord.UseCommandsNext(new CommandsNextConfiguration
             {
-                StringPrefixes = new[] { "!","#","/","\\","$" },
+                StringPrefixes = new[] { "?" },
                 EnableMentionPrefix = true,
-                EnableDms=true,
-                EnableDefaultHelp = true,
+                EnableDms=false,
+                EnableDefaultHelp = true
                 
             });
 
             commands.RegisterCommands<MyCommands>();
-
             await discord.ConnectAsync();
             await Task.Delay(-1);
         }
+
+        private static Task MsgReceiver(DiscordClient sender, MessageCreateEventArgs e)
+        {
+            Console.WriteLine("msg: "+e.Message.Content+" by "+e.Author.Username);
+            return Task.CompletedTask;
+        }
+
+
     }
+
+
     public class MyCommands : BaseCommandModule
     {
         private bool waitingForMessage = false;
@@ -49,7 +59,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         [Command("hello")]
         public async Task Hello(CommandContext ctx)
         {
-            await ctx.RespondAsync("Hello, World!");
+            await ctx.RespondAsync("Jolly ist ne Arschgeige!");
             await ctx.RespondAsync(ctx.Guild.Name);
             await ctx.RespondAsync(ctx.Guild.Id.ToString());
             await ctx.RespondAsync(ctx.User.Username);
@@ -268,6 +278,8 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public ConcurrentBag<string> AllCombinations = new ConcurrentBag<string>();
         public int MatchesPerPlayDay = 0;
         public int PlayerSitoutsPerRound = 0;
+        public ulong Initiator = 0;
+        public DateTime InitTime = DateTime.UtcNow;
 
         public void GenerateMatches()
         {
@@ -440,6 +452,9 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public ConcurrentBag<double> Scores = new ConcurrentBag<double>();
         public int maxTeamsPerMatch = -1;
         public bool played = false;
+        public bool lockReporting = false;
+        public ulong Reporter = 0;
+        public DateTime ReportInit = DateTime.UtcNow;
     }
 
     public class Player
