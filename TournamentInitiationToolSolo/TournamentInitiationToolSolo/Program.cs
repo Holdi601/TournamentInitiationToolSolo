@@ -56,16 +56,6 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         private bool waitingForMessage = false;
         private DiscordMessage lastMessage = null;
 
-        [Command("hello")]
-        public async Task Hello(CommandContext ctx)
-        {
-            await ctx.RespondAsync("Jolly ist ne Arschgeige!");
-            await ctx.RespondAsync(ctx.Guild.Name);
-            await ctx.RespondAsync(ctx.Guild.Id.ToString());
-            await ctx.RespondAsync(ctx.User.Username);
-            await ctx.RespondAsync(ctx.Message.ToString());
-        }
-
         [Command("StartTournament")]
         public async Task StartTournament(CommandContext ctx)
         {
@@ -75,6 +65,8 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                 Program.MasterModePerServer.TryAdd(serverID, "CollectTeamSize");
                 Program.Tournaments.TryAdd(serverID, new TournamentConfig());
                 Program.Tournaments[serverID].ID = serverID;
+                Program.Tournaments[serverID].Initiator = ctx.User.Id;
+                Program.Tournaments[serverID].InitTime = DateTime.UtcNow;
                 await ctx.RespondAsync("Tournament Started");
                 await ctx.RespondAsync("How Many players are in a team?");
                 waitingForMessage = true;
@@ -82,6 +74,21 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
             }
             else
             {
+                DateTime now = DateTime.UtcNow;
+                if ((now - Program.Tournaments[serverID].InitTime).Minutes > 15&&
+                    (Program.MasterModePerServer[serverID]!="Live"&&
+                    Program.MasterModePerServer[serverID]!= "CollectPlayers"))
+                {
+                    Program.MasterModePerServer[serverID] = "CollectTeamSize";
+                    Program.Tournaments.TryRemove(serverID, out var tournaments);
+                    Program.Tournaments.TryAdd(serverID, new TournamentConfig());
+                    Program.Tournaments[serverID].ID = serverID;
+                    Program.Tournaments[serverID].Initiator = ctx.User.Id;
+                    Program.Tournaments[serverID].InitTime = DateTime.UtcNow;
+                    await ctx.RespondAsync("Tournament Started");
+                    await ctx.RespondAsync("How Many players are in a team?");
+                    waitingForMessage = true;
+                }
                 await ctx.RespondAsync("Tournament already Started");
             }
         }
@@ -90,7 +97,15 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public async Task EndTournament(CommandContext ctx)
         {
             ulong serverID = ctx.Guild.Id;
-            if (Program.MasterModePerServer.ContainsKey(serverID))
+            DateTime now= DateTime.UtcNow;
+            if (Program.MasterModePerServer.ContainsKey(serverID) && Program.Tournaments[serverID].Initiator==ctx.User.Id)
+            {
+                Program.MasterModePerServer.TryRemove(serverID, out var server);
+                Program.Tournaments.TryRemove(serverID, out var tournaments);
+            }else if (Program.MasterModePerServer.ContainsKey(serverID)&& 
+                (now - Program.Tournaments[serverID].InitTime).Minutes > 15 &&
+                    (Program.MasterModePerServer[serverID] != "Live" &&
+                    Program.MasterModePerServer[serverID] != "CollectPlayers"))
             {
                 Program.MasterModePerServer.TryRemove(serverID, out var server);
                 Program.Tournaments.TryRemove(serverID, out var tournaments);
@@ -113,8 +128,9 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                     Program.Tournaments[serverID].Players.TryAdd(ctx.User.Id, new Player());
                     Program.Tournaments[serverID].Players[ctx.User.Id].ID = ctx.User.Id;
                     Program.Tournaments[serverID].Players[ctx.User.Id].Name = ctx.User.Username;
+                    Player p = Program.Tournaments[serverID].Players[ctx.User.Id];
+                    Program.Tournaments[serverID].PlayerScores.TryAdd(p, 0);
                     await ctx.RespondAsync("User "+ ctx.User.Username+" added to the Roster");
-
                 }
             }
             else
@@ -132,7 +148,9 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
             {
                 if (Program.Tournaments[serverID].Players.ContainsKey(ctx.User.Id))
                 {
-                    Program.Tournaments[serverID].Players.Remove(serverID, out  var player);
+                    Player player = Program.Tournaments[serverID].Players[ctx.User.Id];
+                    Program.Tournaments[serverID].Players.Remove(serverID, out var p);
+                    Program.Tournaments[serverID].PlayerScores.Remove(player, out double value);
                     await ctx.RespondAsync("User " + ctx.User.Username + " is removed from the Roster");
                 }
                 else
@@ -151,7 +169,8 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public async Task GoLive(CommandContext ctx)
         {
             ulong serverID = ctx.Guild.Id;
-            if (Program.MasterModePerServer.ContainsKey(serverID) && Program.MasterModePerServer[serverID] == "CollectPlayers")
+            if (Program.MasterModePerServer.ContainsKey(serverID) && Program.MasterModePerServer[serverID] == "CollectPlayers"&&
+                Program.Tournaments[serverID].Initiator==ctx.User.Id)
             {
                 await ctx.RespondAsync("Tournament goes live");
                 Program.MasterModePerServer[serverID] = "Live";
@@ -177,6 +196,77 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                 await ctx.RespondAsync("Tournament on this server is not in collectable mode.");
             }
 
+        }
+        [Command("Report")]
+        public async Task Report(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if(Program.MasterModePerServer[serverID] == "Live")
+            {
+                int offset = 0;
+                Round r = null;
+                bool found = false;
+                Player p = Program.Tournaments[serverID].Players[ctx.User.Id];
+                Match mi = null;
+                while (Program.Tournaments[serverID].CurrentRound+offset< Program.Tournaments[serverID].Rounds)
+                {
+                    r = Program.Tournaments[serverID].RoundData.ElementAt(Program.Tournaments[serverID].CurrentRound + offset);
+                    Match m = r.GetMatchForPlayer(p);
+                    if(m==null)
+                    {
+                        offset++;
+                        continue;
+                    }
+                    bool allTeamsAccepted = true;
+                    for (int i = 0; i < m.Agreement.Count; ++i)
+                    {
+                        if(m.Agreement.ElementAt(i).Value!= MATCH_AGREEMENT.AGREED)
+                        {
+                            allTeamsAccepted = false;
+                        }
+                        if (!allTeamsAccepted)
+                        {
+                            mi= m;
+                            break;
+                        }
+                    }
+                    if (!allTeamsAccepted)
+                    {
+                        break;
+                    }
+                    offset++;
+                }
+                if(Program.Tournaments[serverID].CurrentRound + offset == Program.Tournaments[serverID].Rounds)
+                {
+                    await ctx.RespondAsync("No matches for you to report on");
+                    return;
+                }
+                if (mi == null)
+                {
+                    await ctx.RespondAsync("Something went wrong");
+                    return;
+                }
+                bool alreadyReported=false;
+                for(int i=0; i<mi.Agreement.Count; ++i)
+                {
+                    if (mi.Agreement.ElementAt(i).Value == MATCH_AGREEMENT.AGREED)
+                    {
+                        alreadyReported = true;
+                        break;
+                    }
+                }if(alreadyReported)
+                {
+                    string msg = "The Reported result is:\r\n";
+                    for(int i=0; i<mi.Scores.Count; ++i)
+                    {
+                        msg += mi.Scores.ElementAt(i) + " : " + mi.ParticipatingTeams.ElementAt(i).ToString() + " \r\n";
+                    }
+                    await ctx.RespondAsync(msg);
+
+                    return;
+                }
+                
+            }
         }
 
         [Command("ListPlayers")]
@@ -209,17 +299,26 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                 // ignore messages sent by the bot itself
                 return Task.CompletedTask;
             }
-
-            if (waitingForMessage && lastMessage != e.Message)
+            ulong sid = e.Guild.Id;
+            if (waitingForMessage && lastMessage != e.Message&& e.Author.Id == Program.Tournaments[sid].Initiator)
             {
                 ulong serverID = e.Guild.Id;
                 string[] splitted = e.Message.Content.Split(' ');
+                string num = "";
+                if(splitted.Length>1)
+                {
+                    num = splitted[1];
+                }
+                else
+                {
+                    num= splitted[0];
+                }
                 if(Program.Tournaments.ContainsKey(serverID))
                 {
                     switch(Program.MasterModePerServer[serverID]) 
                     {
                         case "CollectTeamSize":
-                            if (!int.TryParse(splitted[1], out Program.Tournaments[serverID].PlayersPerTeam))
+                            if (!int.TryParse(num, out Program.Tournaments[serverID].PlayersPerTeam))
                             {
                                 sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
@@ -231,7 +330,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                             }
                             break;
                         case "CollectTeamsInMatch":
-                            if (!int.TryParse(splitted[1], out Program.Tournaments[serverID].TeamsPerMatch))
+                            if (!int.TryParse(num, out Program.Tournaments[serverID].TeamsPerMatch))
                             {
                                 sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
@@ -243,7 +342,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                             }
                             break;
                         case "CollectRounds":
-                            if (!uint.TryParse(splitted[1], out Program.Tournaments[serverID].Rounds))
+                            if (!int.TryParse(num, out Program.Tournaments[serverID].Rounds))
                             {
                                 sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
@@ -251,7 +350,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                             {
                                 Program.MasterModePerServer[serverID] = "CollectPlayers";
                                 sender.SendMessageAsync(e.Channel, "Rounds is set to " + Program.Tournaments[serverID].Rounds);
-                                sender.SendMessageAsync(e.Channel, "Every player that wants to participate needs to @this acounnt with the message \"RegisterMe\" if the admin is happy execute the command GoLive");
+                                sender.SendMessageAsync(e.Channel, "Every player that wants to participate needs to use the command RegisterMe. If the admin is happy execute the command GoLive");
                                 lastMessage = e.Message;
 
                                 waitingForMessage = false;
@@ -272,7 +371,8 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public ConcurrentDictionary<ulong, Player> Players = new ConcurrentDictionary<ulong, Player>();
         public int PlayersPerTeam = 0;
         public int TeamsPerMatch = 0;
-        public uint Rounds = 0;
+        public int Rounds = 0;
+        public int CurrentRound = 0;
         public ConcurrentBag<Round> RoundData=new ConcurrentBag<Round>();
         public ConcurrentBag<Match> matches = new ConcurrentBag<Match>();
         public ConcurrentBag<string> AllCombinations = new ConcurrentBag<string>();
@@ -280,6 +380,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public int PlayerSitoutsPerRound = 0;
         public ulong Initiator = 0;
         public DateTime InitTime = DateTime.UtcNow;
+        public ConcurrentDictionary<Player, double> PlayerScores = new ConcurrentDictionary<Player, double>();
 
         public void GenerateMatches()
         {
@@ -348,6 +449,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
                         if (r.matches.ElementAt(z).ParticipatingTeams.Count< r.matches.ElementAt(z).maxTeamsPerMatch)
                         {
                             r.matches.ElementAt(z).ParticipatingTeams.Add(t);
+                            r.matches.ElementAt(z).Agreement.Add(t, MATCH_AGREEMENT.UNREPORTED);
                             break;
                         }
                     }
@@ -443,8 +545,19 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
             }
             return false;
         }
-    }
 
+        public override string ToString()
+        {
+            if (Players.Count == 0) return "";
+            string result = "<@"+Players.ElementAt(0).ID.ToString()+">";
+            for(int i=1; i<Players.Count; ++i)
+            {
+                result += " + <@" + Players.ElementAt(i).ID.ToString() + ">";
+            }
+            return result;
+        }
+    }
+    public enum MATCH_AGREEMENT { UNREPORTED, AGREED, DISPUTE}
     public class Match
     {
         public ConcurrentBag<Team> ParticipatingTeams = new ConcurrentBag<Team>();
@@ -455,6 +568,7 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public bool lockReporting = false;
         public ulong Reporter = 0;
         public DateTime ReportInit = DateTime.UtcNow;
+        public Dictionary<Team, MATCH_AGREEMENT> Agreement = new Dictionary<Team, MATCH_AGREEMENT>();
     }
 
     public class Player
@@ -469,6 +583,18 @@ namespace DSharpPlus.ExampleBots.CommandsNext.HelloWorld
         public ConcurrentBag<Match> matches = new ConcurrentBag<Match>();
         public bool finished=false;
         public int MatchesPerPlayDay = -1;
+
+        public Match GetMatchForPlayer(Player player)
+        {
+            foreach(Match match in matches)
+            {
+                foreach(Team team in match.ParticipatingTeams)
+                {
+                    if (team.Players.Contains(player)) return match;
+                }
+            }
+            return null;
+        }
 
         public int PlayersActiveInRound()
         {
