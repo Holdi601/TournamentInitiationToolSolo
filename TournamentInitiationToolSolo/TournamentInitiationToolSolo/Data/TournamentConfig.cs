@@ -1,4 +1,5 @@
-﻿using System;
+﻿using DSharpPlus.Entities;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,9 +23,10 @@ namespace TournamentInitiationToolSolo
         public int PlayerSitoutsPerRound = 0;
         public ulong Initiator = 0;
         public DateTime InitTime = DateTime.UtcNow;
-        public ConcurrentDictionary<Player, double> PlayerScores = new ConcurrentDictionary<Player, double>();
         public ConcurrentDictionary<ulong, int> ReportStep = new ConcurrentDictionary<ulong, int>();
-        public ConcurrentDictionary<string, ulong> MatchReporter =new ConcurrentDictionary<string, ulong>();
+        public int SetResultStep = -1;
+        public int SetResultRound = -1;
+        public int SetResultMatch = -1;
 
         public void GenerateMatches()
         {
@@ -104,11 +106,43 @@ namespace TournamentInitiationToolSolo
                 }
             }
         }
-        public void CheckCurrentRound()
+        public Dictionary<Player, double> CalculatePlayerScores()
+        {
+            Dictionary<Player, double> result=  new Dictionary<Player, double>();
+            foreach(KeyValuePair<ulong,Player> p in Players)
+            {
+                result.Add(p.Value, 0);
+            }
+            foreach(Round r in RoundData)
+            {
+                foreach(Match m in r.matches)
+                {
+                    if(m.finished)
+                    {
+                        for (int i = 0; i < m.ParticipatingTeams.Count; ++i)
+                        {
+                            foreach (Player p in m.ParticipatingTeams.ElementAt(i).Players)
+                            {
+                                result[p] += m.Scores.ElementAt(i);
+                            }
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+        public void AdminSetResultMatch(int round, int match, ConcurrentBag<double> scores)
+        {
+            RoundData.ElementAt(round).matches.ElementAt(match).Scores=scores;
+            for(int i=0; i< RoundData.ElementAt(round).matches.ElementAt(match).Agreement.Count; ++i)
+            {
+                RoundData.ElementAt(round).matches.ElementAt(match).Agreement[RoundData.ElementAt(round).matches.ElementAt(match).ParticipatingTeams.ElementAt(i)] = MATCH_AGREEMENT.AGREED;
+            }
+        }
+        public async void CheckCurrentRound(DiscordChannel dc)
         {
             for(int i=0; i<Rounds; i++)
             {
-                bool allMatchesCompleted = true;
                 foreach(Match m in RoundData.ElementAt(i).matches)
                 {
                     foreach(KeyValuePair<Team, MATCH_AGREEMENT> kvp in m.Agreement)
@@ -119,8 +153,26 @@ namespace TournamentInitiationToolSolo
                             return;
                         }
                     }
+                    m.finished = true;
                 }
             }
+            await dc.SendMessageAsync("Tournament is over! Thanks everybody for taking part!");
+            await dc.SendMessageAsync(ResultsToString(CalculatePlayerScores(), true));
+            Program.Tournaments.Remove(ID, out TournamentConfig cfg);
+            Program.MasterModePerServer.Remove(ID, out var mm);
+            //All played
+        }
+        public string ResultsToString(Dictionary<Player, double> results, bool final)
+        {
+            string message = "";
+            if (final) message = "The final results are as followed:\r\n";
+            else message = "The temporary results are as followed:\r\n";
+            var orderedDict = results.OrderByDescending(x => x.Value);
+            for(int i=0; i<orderedDict.Count(); ++i)
+            {
+                message += (i + 1).ToString() + " - "+orderedDict.ElementAt(i).Value.ToString()+" - "+"<@" + orderedDict.ElementAt(i).Key.ID + "> \r\n";
+            }
+            return message;
         }
         public List<ulong> SortedPlayerList()
         {
@@ -228,6 +280,16 @@ namespace TournamentInitiationToolSolo
             }
             team.PlayersPerTeam = PlayersPerTeam;
             return team;
+        }
+
+        public string GetMatchPlan()
+        {
+            string result = "";
+            for(int i=0; i<RoundData.Count; ++i)
+            {
+                result += "\r\n\r\n\r\nRound " + i.ToString() + " : \r\n" + RoundData.ElementAt(i).ToString();
+            }
+            return result;
         }
     }
 }

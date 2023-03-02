@@ -81,5 +81,15 @@ namespace TournamentInitiationToolSolo
             if (iMatchtes != MatchesPerPlayDay) return false;
             else return true;
         }
+
+        public override string ToString()
+        {
+            string result = "\r\n\r\nMatch 0 :\r\n" +matches.ElementAt(0).ToString();
+            for(int i=1; i<matches.Count; ++i)
+            {
+                result+= "\r\n\r\nMatch "+i.ToString()+" :\r\n" + matches.ElementAt(0).ToString();
+            }
+            return result;
+        }
     }
 }

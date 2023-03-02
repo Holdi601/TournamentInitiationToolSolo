@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualBasic;
+using System.Collections.Concurrent;
 
 namespace TournamentInitiationToolSolo
 {
@@ -16,13 +17,93 @@ namespace TournamentInitiationToolSolo
         private bool waitingForMessage = false;
         private DiscordMessage lastMessage = null;
 
-        //Report Results
-        //Show my current match
         //Admin set Results
-        //Show current Ranking
-        //Show current Round
-        //Show all Matches
-        //Tournament Status
+        //Move players voice channel
+        [Command("SetResults")]
+        public async Task SetResults(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID)
+                && Program.MasterModePerServer[serverID] == "Live")
+            {
+                if (ctx.User.Id != Program.Tournaments[serverID].Initiator)
+                {
+                    await ctx.Channel.SendMessageAsync("You are not the Admin of the Tournament. You have no right to set results.");
+                }
+                else
+                {
+                    Program.Tournaments[serverID].SetResultStep = 0;
+                    await ctx.Channel.SendMessageAsync("Please enter the Round number of the match you want to set.");
+                }
+            }
+        }
+
+        [Command("ShowMyMatch")]
+        public async Task ShowMyMatch(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID)
+                && Program.MasterModePerServer[serverID] == "Live")
+            {
+                Player p = Program.Tournaments[serverID].Players[ctx.User.Id];
+                Match mi = Program.Tournaments[serverID].GetPendingMatchForPlayer(p.ID);
+                if (mi != null)
+                {
+                    await ctx.Channel.SendMessageAsync("Your (<@"+ctx.User.Id+">) current unresolved Match is: \r\n"+mi.ToString());
+                }
+                else
+                {
+                    await ctx.Channel.SendMessageAsync("You (<@" + ctx.User.Id + ">) don't seem to have a match left");
+                }
+            }
+        }
+
+        [Command("ShowAllMatches")]
+        public async Task ShowAllMatches(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID)
+                && Program.MasterModePerServer[serverID] == "Live")
+            {
+                await ctx.Channel.SendMessageAsync(Program.Tournaments[serverID].GetMatchPlan());
+            }
+        }
+
+        [Command("ShowCurrentRound")]
+        public async Task ShowCurrentRound(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID)
+                && Program.MasterModePerServer[serverID] == "Live")
+            {
+                await ctx.Channel.SendMessageAsync(Program.Tournaments[serverID].RoundData.ElementAt(Program.Tournaments[serverID].CurrentRound).ToString());
+            }
+        }
+
+        [Command("TournamentStatus")]
+        public async Task TournamentStatus(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID))
+            {
+                await ctx.RespondAsync("Master Mode: " + Program.MasterModePerServer[serverID]);
+            }
+            else
+            {
+                await ctx.RespondAsync("No Tournament started for this Server");
+            }
+        }
+
+        [Command("CurrentRanking")]
+        public async Task CurrentRanking(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.MasterModePerServer.ContainsKey(serverID)
+                && Program.MasterModePerServer[serverID] =="Live")
+            {
+                await ctx.Channel.SendMessageAsync(Program.Tournaments[serverID].ResultsToString(Program.Tournaments[serverID].CalculatePlayerScores(), false));
+            }
+        }
 
         [Command("StartTournament")]
         public async Task StartTournament(CommandContext ctx)
@@ -97,7 +178,6 @@ namespace TournamentInitiationToolSolo
                     Program.Tournaments[serverID].Players[ctx.User.Id].ID = ctx.User.Id;
                     Program.Tournaments[serverID].Players[ctx.User.Id].Name = ctx.User.Username;
                     Player p = Program.Tournaments[serverID].Players[ctx.User.Id];
-                    Program.Tournaments[serverID].PlayerScores.TryAdd(p, 0);
                     await ctx.RespondAsync("User " + ctx.User.Username + " added to the Roster");
                 }
             }
@@ -118,7 +198,6 @@ namespace TournamentInitiationToolSolo
                 {
                     Player player = Program.Tournaments[serverID].Players[ctx.User.Id];
                     Program.Tournaments[serverID].Players.Remove(serverID, out var p);
-                    Program.Tournaments[serverID].PlayerScores.Remove(player, out double value);
                     await ctx.RespondAsync("User " + ctx.User.Username + " is removed from the Roster");
                 }
                 else
@@ -223,13 +302,16 @@ namespace TournamentInitiationToolSolo
                     else
                     {
                         mi.lockReporting = true;
+                        mi.ReportInit = DateTime.UtcNow;
                         if (Program.Tournaments[serverID].ReportStep.ContainsKey(mi.Reporter))
                         {
                             Program.Tournaments[serverID].ReportStep.Remove(mi.Reporter, out int mid);
                         }
                         mi.Reporter = ctx.User.Id;
-                        Program.Tournaments[serverID].ReportStep.TryAdd(ctx.User.Id, 0);
+                        
                     }
+                    Program.Tournaments[serverID].ReportStep.TryAdd(ctx.User.Id, 0);
+                    await ctx.Channel.SendMessageAsync("Please enter the score the team receives for this round: "+mi.ParticipatingTeams.ElementAt(0).ToString());
                 }
             }
         }
@@ -270,7 +352,7 @@ namespace TournamentInitiationToolSolo
                         {
                             mi.ConfirmResults(p);
                             await e.Interaction.CreateResponseAsync(InteractionResponseType.UpdateMessage, new DiscordInteractionResponseBuilder().WithContent("Thanks for reporting the Match."));
-                            Program.Tournaments[serverId].CheckCurrentRound();
+                            Program.Tournaments[serverId].CheckCurrentRound(e.Interaction.Channel);
                         }
                         else
                         {
@@ -294,12 +376,12 @@ namespace TournamentInitiationToolSolo
             }
         }
 
-        public Task Client_MessageCreated(DiscordClient sender, DSharpPlus.EventArgs.MessageCreateEventArgs e)
+        public async Task Client_MessageCreated(DiscordClient sender, DSharpPlus.EventArgs.MessageCreateEventArgs e)
         {
             if (e.Author == sender.CurrentUser)
             {
                 // ignore messages sent by the bot itself
-                return Task.CompletedTask;
+                return;
             }
             ulong sid = e.Guild.Id;
             if (Program.Tournaments.ContainsKey(sid)
@@ -327,37 +409,37 @@ namespace TournamentInitiationToolSolo
                         case "CollectTeamSize":
                             if (!int.TryParse(num, out Program.Tournaments[serverID].PlayersPerTeam))
                             {
-                                sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
+                                await sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
                             else
                             {
                                 Program.MasterModePerServer[serverID] = "CollectTeamsInMatch";
-                                sender.SendMessageAsync(e.Channel, "Team size is set to " + Program.Tournaments[serverID].PlayersPerTeam);
-                                sender.SendMessageAsync(e.Channel, "How many Teams are in a Match?");
+                                await sender.SendMessageAsync(e.Channel, "Team size is set to " + Program.Tournaments[serverID].PlayersPerTeam);
+                                await sender.SendMessageAsync(e.Channel, "How many Teams are in a Match?");
                             }
                             break;
                         case "CollectTeamsInMatch":
                             if (!int.TryParse(num, out Program.Tournaments[serverID].TeamsPerMatch))
                             {
-                                sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
+                                await sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
                             else
                             {
                                 Program.MasterModePerServer[serverID] = "CollectRounds";
-                                sender.SendMessageAsync(e.Channel, "Teams per Match is set to " + Program.Tournaments[serverID].TeamsPerMatch);
-                                sender.SendMessageAsync(e.Channel, "How many Rounds should be played?");
+                                await sender.SendMessageAsync(e.Channel, "Teams per Match is set to " + Program.Tournaments[serverID].TeamsPerMatch);
+                                await sender.SendMessageAsync(e.Channel, "How many Rounds should be played?");
                             }
                             break;
                         case "CollectRounds":
                             if (!int.TryParse(num, out Program.Tournaments[serverID].Rounds))
                             {
-                                sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
+                                await sender.SendMessageAsync(e.Channel, "The Number you have given is not a valid integer");
                             }
                             else
                             {
                                 Program.MasterModePerServer[serverID] = "CollectPlayers";
-                                sender.SendMessageAsync(e.Channel, "Rounds is set to " + Program.Tournaments[serverID].Rounds);
-                                sender.SendMessageAsync(e.Channel, "Every player that wants to participate needs to use the command RegisterMe. If the admin is happy execute the command GoLive");
+                                await sender.SendMessageAsync(e.Channel, "Rounds is set to " + Program.Tournaments[serverID].Rounds);
+                                await sender.SendMessageAsync(e.Channel, "Every player that wants to participate needs to use the command RegisterMe. If the admin is happy execute the command GoLive");
                                 lastMessage = e.Message;
 
                                 waitingForMessage = false;
@@ -366,8 +448,118 @@ namespace TournamentInitiationToolSolo
                         default: break;
                     }
                 }
+            } else if (Program.Tournaments.ContainsKey(sid) &&
+            Program.MasterModePerServer[sid] == "Live"
+            && e.Author.Id == Program.Tournaments[sid].Initiator
+            && Program.Tournaments[sid].SetResultStep>-1) 
+            {
+                switch (Program.Tournaments[sid].SetResultStep)
+                {
+                    case 0:
+                        if (int.TryParse(e.Message.Content, out Program.Tournaments[sid].SetResultRound)
+                            && Program.Tournaments[sid].SetResultRound>=0&&
+                            Program.Tournaments[sid].SetResultRound< Program.Tournaments[sid].Rounds)
+                        {
+                            Program.Tournaments[sid].SetResultStep++;
+                            await e.Channel.SendMessageAsync("Thanks. Now enter the Match number");
+                        }
+                        else
+                        {
+                            await e.Channel.SendMessageAsync("Not a valid round number.");
+                        }
+                        break;
+                    case 1:
+                        if (int.TryParse(e.Message.Content, out Program.Tournaments[sid].SetResultMatch)
+                            && Program.Tournaments[sid].SetResultMatch >= 0 &&
+                            Program.Tournaments[sid].SetResultMatch < Program.Tournaments[sid].MatchesPerPlayDay)
+                        {
+                            Program.Tournaments[sid].SetResultStep++;
+                            await e.Channel.SendMessageAsync("Thanks. Now enter the score for each team. Segregate each teams score with a whitespace and no whitespaces in the start or end");
+                        }
+                        else
+                        {
+                            await e.Channel.SendMessageAsync("Not a valid round number.");
+                        }
+                        break;
+                    case 2:
+                        Match ma = Program.Tournaments[sid].RoundData.ElementAt(Program.Tournaments[sid].SetResultRound).matches.ElementAt(Program.Tournaments[sid].SetResultMatch);
+                        string[] results = e.Message.Content.Split(' ');
+                        if (results.Length == ma.ParticipatingTeams.Count)
+                        {
+                            ConcurrentBag<double> newResults = new ConcurrentBag<double>();
+                            for(int i=0; i<results.Length; i++)
+                            {
+                                if (double.TryParse(results[i], out var oneResult))
+                                {
+                                    newResults.Add(oneResult);
+                                }
+                                else
+                                {
+                                    await e.Channel.SendMessageAsync(results[i]+ "is not a valid double");
+                                    return;
+                                }
+                            }
+                            Program.Tournaments[sid].AdminSetResultMatch(Program.Tournaments[sid].SetResultRound, Program.Tournaments[sid].SetResultMatch, newResults);
+                            Program.Tournaments[sid].SetResultStep = -1;
+                            await e.Channel.SendMessageAsync("Results have been changed");
+                        }
+                        else
+                        {
+                            await e.Channel.SendMessageAsync("Result amount mismatches team amount");
+                        }
+                        break;
+                }
+            } else if (Program.Tournaments.ContainsKey(sid) &&
+            Program.MasterModePerServer[sid] == "Live")
+            {
+                if (Program.Tournaments[sid].ReportStep.ContainsKey(e.Author.Id))
+                {
+                    Match mi = Program.Tournaments[sid].GetPendingMatchForPlayer(e.Author.Id);
+                    if (mi == null)
+                    {
+                        return;
+                    }
+                    if (Program.Tournaments[sid].ReportStep[e.Author.Id] >= mi.ParticipatingTeams.Count)
+                    {
+                        return;
+                    }
+                    if (double.TryParse(e.Message.Content, out var points))
+                    {
+                        if (Program.Tournaments[sid].ReportStep[e.Author.Id] < mi.ParticipatingTeams.Count)
+                        {
+                            mi.Scores.Add(points);
+                            Program.Tournaments[sid].ReportStep[e.Author.Id]++;
+                        }
+                        if (Program.Tournaments[sid].ReportStep[e.Author.Id] >= mi.ParticipatingTeams.Count)
+                        {
+                            Team t = null;
+                            foreach (Team ti in mi.ParticipatingTeams)
+                            {
+                                foreach (Player p in ti.Players)
+                                {
+                                    if (p.ID == e.Author.Id)
+                                    {
+                                        mi.Agreement[ti] = MATCH_AGREEMENT.AGREED;
+                                        Program.Tournaments[sid].ReportStep.Remove(p.ID, out var outval);
+                                        mi.ReportInit = DateTime.UtcNow;
+                                    }
+                                }
+                            }
+                            mi.lockReporting = false;
+                            await e.Channel.SendMessageAsync("Thanks for reporting the result.");
+                        }
+                        else
+                        {
+                            await e.Channel.SendMessageAsync("Please now enter the points the following teams scored for this match: " + mi.ParticipatingTeams.ElementAt(Program.Tournaments[sid].ReportStep[e.Author.Id]).ToString());
+                        }
+                    }
+                    else
+                    {
+                        await e.Channel.SendMessageAsync("<@" + e.Author.Id.ToString() + "> That is not a valid double/decimal value");
+                    }
+                }
             }
-            return Task.CompletedTask;
+            return;
         }
     }
 }

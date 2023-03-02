@@ -16,6 +16,7 @@ namespace TournamentInitiationToolSolo
         public bool lockReporting = false;
         public ulong Reporter = 0;
         public DateTime ReportInit = DateTime.UtcNow;
+        public bool finished = false;
         public Dictionary<Team, MATCH_AGREEMENT> Agreement = new Dictionary<Team, MATCH_AGREEMENT>();
 
         public string GenerateID()
@@ -52,6 +53,17 @@ namespace TournamentInitiationToolSolo
             {
                 Agreement[t] = MATCH_AGREEMENT.UNREPORTED;
             }
+        }
+
+        public override string ToString()
+        {
+            string result = "Team 0: "+ ParticipatingTeams.ElementAt(0).ToString();
+            for(int i=1; i< ParticipatingTeams.Count; ++i)
+            {
+                result += "\r\n versus \r\nTeam "+i.ToString() + ParticipatingTeams.ElementAt(i).ToString();
+            }
+            
+            return result;
         }
     }
 
