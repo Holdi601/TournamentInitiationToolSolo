@@ -17,9 +17,23 @@ namespace TournamentInitiationToolSolo
         public static ConcurrentDictionary<ulong, TournamentConfig> Tournaments = new ConcurrentDictionary<ulong, TournamentConfig>();
         public static DiscordClient discord;
         public static CommandsNextExtension commands;
+        public static string ProgPath="";
+        public static string DataPath="";
+        
 
         static async Task Main(string[] args)
         {
+            string exePath =  System.Reflection.Assembly.GetExecutingAssembly().Location;
+            string[] rawPath = exePath.Split('\\');
+            for(int i=0; i<rawPath.Length-1; ++i)
+            {
+                ProgPath+=rawPath[i]+"\\";   
+            }
+            DataPath=ProgPath+"\\Data";
+            if (!Directory.Exists(DataPath))
+            {
+                Directory.CreateDirectory(DataPath);
+            }
             discord = new DiscordClient(new DiscordConfiguration
             {
                 Token = Environment.GetEnvironmentVariable("TITS_TOKEN", EnvironmentVariableTarget.User),
