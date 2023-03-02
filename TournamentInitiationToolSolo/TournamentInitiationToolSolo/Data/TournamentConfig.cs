@@ -29,6 +29,7 @@ namespace TournamentInitiationToolSolo
         public int SetResultStep = -1;
         public int SetResultRound = -1;
         public int SetResultMatch = -1;
+        public string MasterMode = "";
 
         public void SaveState(bool final=false)
         {
