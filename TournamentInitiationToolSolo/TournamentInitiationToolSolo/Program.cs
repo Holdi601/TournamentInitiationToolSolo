@@ -34,6 +34,7 @@ namespace TournamentInitiationToolSolo
             {
                 Directory.CreateDirectory(DataPath);
             }
+            LoadData();
             discord = new DiscordClient(new DiscordConfiguration
             {
                 Token = Environment.GetEnvironmentVariable("TITS_TOKEN", EnvironmentVariableTarget.User),
@@ -55,6 +56,29 @@ namespace TournamentInitiationToolSolo
             discord.ComponentInteractionCreated += mc.Client_InteractionCreated;
             await discord.ConnectAsync();
             await Task.Delay(-1);
+        }
+        
+        public static LoadData()
+        {
+            string filePrefix = "run_";
+            string fileExtension = ".json";
+            string[] files = Directory.GetFiles(DataPath, filePrefix + "*" + fileExtension);
+            JsonSerializerOptions options = new JsonSerializerOptions
+                {
+                    ReferenceHandler = ReferenceHandler.Preserve,
+                    IncludeFields = true
+                };
+            foreach (string file in files)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(file);
+                fileName = fileName.Substring(filePrefix.Length);
+                ulong fileNumber;
+                if (ulong.TryParse(fileName, out fileNumber))
+                {
+                    string json= File.ReadAllText(DataPath +"\\"+file);
+                    tc = JsonSerializer.Deserialize<TournamentConfig>(json, options);
+                }
+            }
         }
     }
     public enum MATCH_AGREEMENT { UNREPORTED, AGREED, DISPUTE}
