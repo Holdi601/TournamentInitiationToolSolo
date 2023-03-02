@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TournamentInitiationToolSolo
 {
@@ -28,6 +30,32 @@ namespace TournamentInitiationToolSolo
         public int SetResultRound = -1;
         public int SetResultMatch = -1;
 
+        public void SaveState(bool final=false)
+        {
+            JsonSerializerOptions options = new JsonSerializerOptions
+            {
+                ReferenceHandler = ReferenceHandler.Preserve,
+                IncludeFields = true
+            };
+            string json = JsonSerializer.Serialize(this, options);
+            string path="";
+            if(final)
+            {
+                string toDelete=Program.DataPath+"\\run_"+ID.ToString()+".json"
+                if (File.Exists(toDelete))
+                {
+                    File.Delete(toDelete);
+                }
+                path = Program.DataPath+"\\finished_"+ID.ToString()+".json";
+            }
+            else
+            {
+                path = Program.DataPath+"\\run_"+ID.ToString()+".json";
+            }
+            File.WriteAllText(path, json);
+        }
+            
+        
         public void GenerateMatches()
         {
             AllCombinations = getAllPossibleCombinationWithLength(SortedPlayerList(), Convert.ToInt32(PlayersPerTeam));
@@ -105,6 +133,7 @@ namespace TournamentInitiationToolSolo
                     plannedTeamMatches[t]++;
                 }
             }
+            SaveState();
         }
         public Dictionary<Player, double> CalculatePlayerScores()
         {
@@ -150,6 +179,7 @@ namespace TournamentInitiationToolSolo
                         if(kvp.Value != MATCH_AGREEMENT.AGREED)
                         {
                             CurrentRound = i;
+                            SaveState(false);
                             return;
                         }
                     }
@@ -160,6 +190,7 @@ namespace TournamentInitiationToolSolo
             await dc.SendMessageAsync(ResultsToString(CalculatePlayerScores(), true));
             Program.Tournaments.Remove(ID, out TournamentConfig cfg);
             Program.MasterModePerServer.Remove(ID, out var mm);
+            SaveState(true);
             //All played
         }
         public string ResultsToString(Dictionary<Player, double> results, bool final)
