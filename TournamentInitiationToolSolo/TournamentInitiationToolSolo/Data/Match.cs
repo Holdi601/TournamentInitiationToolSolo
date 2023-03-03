@@ -9,15 +9,15 @@ namespace TournamentInitiationToolSolo
 {
     public class Match
     {
-        public ConcurrentBag<Team> ParticipatingTeams = new ConcurrentBag<Team>();
+        public Team[] ParticipatingTeams = null;
         public int Round = 0;
-        public ConcurrentBag<double> Scores = new ConcurrentBag<double>();
+        public double[] Scores = null;
         public int maxTeamsPerMatch = -1;
         public bool lockReporting = false;
         public ulong Reporter = 0;
         public DateTime ReportInit = DateTime.UtcNow;
         public bool finished = false;
-        public Dictionary<Team, MATCH_AGREEMENT> Agreement = new Dictionary<Team, MATCH_AGREEMENT>();
+        public Dictionary<int, MATCH_AGREEMENT> Agreement = new Dictionary<int, MATCH_AGREEMENT>();
 
         public string GenerateID()
         {
@@ -34,12 +34,11 @@ namespace TournamentInitiationToolSolo
 
         public void ConfirmResults(Player p)
         {
-            foreach(Team t in ParticipatingTeams)
+            for(int i=0; i< ParticipatingTeams.Length; i++)
             {
-                if (t.Players.Contains(p))
+                if (ParticipatingTeams.ElementAt(i).Players.Contains(p))
                 {
-                    if (!Agreement.ContainsKey(t)) Agreement.TryAdd(t, MATCH_AGREEMENT.AGREED);
-                    else Agreement[t]=MATCH_AGREEMENT.AGREED;
+                    Agreement[i] = MATCH_AGREEMENT.AGREED;
                     return;
                 }
             }
@@ -48,21 +47,38 @@ namespace TournamentInitiationToolSolo
         public void ResetMatch()
         {
             lockReporting = false;
-            Scores.Clear();
-            foreach(Team t in ParticipatingTeams)
+            Scores=new double[Scores.Length];
+            for(int i=0; i<Agreement.Count; i++)
             {
-                Agreement[t] = MATCH_AGREEMENT.UNREPORTED;
+                Agreement[i] = MATCH_AGREEMENT.UNREPORTED;
             }
         }
 
         public override string ToString()
         {
             string result = "Team 0: "+ ParticipatingTeams.ElementAt(0).ToString();
-            for(int i=1; i< ParticipatingTeams.Count; ++i)
+            for(int i=1; i< ParticipatingTeams.Length; ++i)
             {
-                result += "\r\n versus \r\nTeam "+i.ToString() + ParticipatingTeams.ElementAt(i).ToString();
+                result += "\r\n versus \r\nTeam "+i.ToString()+": " + ParticipatingTeams.ElementAt(i).ToString();
             }
             
+            return result;
+        }
+
+        public int CurrentTeamCount()
+        {
+            int result = 0;
+            if (ParticipatingTeams == null)
+            {
+                ParticipatingTeams = new Team[maxTeamsPerMatch];
+            }
+            for(int i=0; i< ParticipatingTeams.Length;++i)
+            {
+                if (ParticipatingTeams[i] != null)
+                {
+                    result++;
+                }
+            }
             return result;
         }
     }

@@ -9,7 +9,7 @@ namespace TournamentInitiationToolSolo
 {
     public class Team
     {
-        public ConcurrentBag<Player> Players = new ConcurrentBag<Player>();
+        public Player[] Players = null;
         public int PlayersPerTeam = 0;
         public bool ContainsPlayer(Player player)
         {
@@ -18,20 +18,34 @@ namespace TournamentInitiationToolSolo
         }
         public bool ContainsPlayer(ulong uid)
         {
-            for (int i = 0; i < Players.Count; ++i)
+            for (int i = 0; i < Players.Length; ++i)
             {
-                if (Players.ElementAt(i).ID == uid) return true;
+                if (Players[i] != null && Players[i].ID == uid) return true;
             }
             return false;
         }
 
         public override string ToString()
         {
-            if (Players.Count == 0) return "";
+            if (CountPlayers() == 0) return "";
             string result = "<@" + Players.ElementAt(0).ID.ToString() + ">";
-            for (int i = 1; i < Players.Count; ++i)
+            for (int i = 1; i < CountPlayers(); ++i)
             {
-                result += " + <@" + Players.ElementAt(i).ID.ToString() + ">";
+                result += " + <@" + Players[i].ID.ToString() + ">";
+            }
+            return result;
+        }
+
+        public int CountPlayers()
+        {
+            int result = 0;
+            if(Players==null)
+            {
+                Players = new Player[PlayersPerTeam];
+            }
+            for(int i = 0; i<Players.Length; ++i)
+            {
+                result++;
             }
             return result;
         }

@@ -10,6 +10,21 @@ using System.Text.Json.Serialization;
 
 namespace TournamentInitiationToolSolo
 {
+    public static class ListExtensions
+    {
+        public static void Shuffle<T>(this IList<T> list, Random rng)
+        {
+            int n = list.Count;
+            while (n > 1)
+            {
+                n--;
+                int k = rng.Next(n + 1);
+                T value = list[k];
+                list[k] = list[n];
+                list[n] = value;
+            }
+        }
+    }
     public class TournamentConfig
     {
         public ulong ID = 0;
@@ -18,9 +33,8 @@ namespace TournamentInitiationToolSolo
         public int TeamsPerMatch = 0;
         public int Rounds = 0;
         public int CurrentRound = 0;
-        public ConcurrentBag<Round> RoundData = new ConcurrentBag<Round>();
-        public ConcurrentBag<Match> matches = new ConcurrentBag<Match>();
-        public ConcurrentBag<string> AllCombinations = new ConcurrentBag<string>();
+        public Round[] RoundData = null;
+        public string[] AllCombinations = null;
         public int MatchesPerPlayDay = 0;
         public int PlayerSitoutsPerRound = 0;
         public ulong Initiator = 0;
@@ -33,36 +47,89 @@ namespace TournamentInitiationToolSolo
 
         public void SaveState(bool final=false)
         {
-            JsonSerializerOptions options = new JsonSerializerOptions
+            try
             {
-                ReferenceHandler = ReferenceHandler.Preserve,
-                IncludeFields = true
-            };
-            string json = JsonSerializer.Serialize(this, options);
-            string path="";
-            if(final)
-            {
-                string toDelete=Program.DataPath+"\\run_"+ID.ToString()+".json"
-                if (File.Exists(toDelete))
+                JsonSerializerOptions options = new JsonSerializerOptions
                 {
-                    File.Delete(toDelete);
+                    ReferenceHandler = ReferenceHandler.Preserve,
+                    IncludeFields = true
+                };
+                string json = JsonSerializer.Serialize(this, options);
+                string path = "";
+                if (final)
+                {
+                    string toDelete = Program.DataPath + "\\run_" + ID.ToString() + ".json";
+                    if (File.Exists(toDelete))
+                    {
+                        try
+                        {
+                            File.Delete(toDelete);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                        }
+
+                    }
+                    path = Program.DataPath + "\\finished_" + ID.ToString() + ".json";
                 }
-                path = Program.DataPath+"\\finished_"+ID.ToString()+".json";
+                else
+                {
+                    path = Program.DataPath + "\\run_" + ID.ToString() + ".json";
+                }
+                try
+                {
+                    File.WriteAllText(path, json);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(ex.ToString());
+                }
             }
-            else
+            catch(Exception e)
             {
-                path = Program.DataPath+"\\run_"+ID.ToString()+".json";
+                Console.WriteLine(e.ToString());
             }
-            File.WriteAllText(path, json);
         }
             
-        
+        public void UnitTest()
+        {
+            int playerToGen = 5;
+            Random r = new Random();
+            for(int i=0; i<playerToGen; i++)
+            {
+                Player player = new Player();
+                player.ID = Generate(r);
+                player.Name = Generate(5,r);
+                Players.TryAdd(player.ID, player);
+            }
+            GenerateMatches();
+            string matchplan = GetMatchPlan();
+            Console.WriteLine("Generating Done plan is:");
+            Console.WriteLine(matchplan);
+
+        }
+
+        public static string Generate(int length, Random random)
+        {
+            const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            return new string(Enumerable.Repeat(chars, length)
+              .Select(s => s[random.Next(s.Length)]).ToArray());
+        }
+
+        public static ulong Generate(Random random)
+        {
+            byte[] bytes = new byte[8];
+            random.NextBytes(bytes);
+            return BitConverter.ToUInt64(bytes, 0);
+        }
+
         public void GenerateMatches()
         {
-            AllCombinations = getAllPossibleCombinationWithLength(SortedPlayerList(), Convert.ToInt32(PlayersPerTeam));
-            MatchesPerPlayDay = Convert.ToInt32(Players.Count / PlayersPerTeam);
-            PlayerSitoutsPerRound = Players.Count - Convert.ToInt32(MatchesPerPlayDay * PlayersPerTeam);
-
+            AllCombinations = getAllPossibleCombinationWithLength(SortedPlayerList(), Convert.ToInt32(PlayersPerTeam)).ToArray();
+            MatchesPerPlayDay = Players.Count / (PlayersPerTeam * TeamsPerMatch);
+            PlayerSitoutsPerRound = Players.Count - Convert.ToInt32(MatchesPerPlayDay * PlayersPerTeam * TeamsPerMatch);
+            RoundData = new Round[Rounds];
             Dictionary<Player, int> plannedMatches = new Dictionary<Player, int>();
             Dictionary<Team, int> plannedTeamMatches = new Dictionary<Team, int>();
             foreach (string combo in AllCombinations)
@@ -73,26 +140,37 @@ namespace TournamentInitiationToolSolo
             {
                 plannedMatches.Add(Players.ElementAt(i).Value, 0);
             }
+            Random rng1 = new Random();
+            Random rng2 = new Random();
+            List<KeyValuePair<Player, int>> randomizedPlannedMatches = plannedMatches.ToList();
+            List<KeyValuePair<Team, int>> randomizedPlannedTeamMatches = plannedTeamMatches.ToList();
+            randomizedPlannedMatches.Shuffle(rng1);
+            randomizedPlannedTeamMatches.Shuffle(rng2);
+
             for (int i = 0; i < Rounds; ++i)
             {
                 Round r = new Round();
                 r.number = i;
                 r.MatchesPerPlayDay = MatchesPerPlayDay;
+                r.matches = new Match[MatchesPerPlayDay]; 
                 for (int k = 0; k < MatchesPerPlayDay; ++k)
                 {
                     Match m = new Match();
                     m.maxTeamsPerMatch = TeamsPerMatch;
+                    m.Scores = new double[TeamsPerMatch];
+                    m.ParticipatingTeams= new Team[TeamsPerMatch];
                     m.Round = i;
-                    r.matches.Add(m);
+                    r.matches[k] = m;
+                    
                 }
                 while (!r.AreAllMatchesFilled())
                 {
-                    List<KeyValuePair<Player, int>> list = plannedMatches.ToList();
+                    List<KeyValuePair<Player, int>> list = randomizedPlannedMatches.ToList();
                     list.Sort((x, y) => x.Value.CompareTo(y.Value));
-                    List<KeyValuePair<Team, int>> tlist = plannedTeamMatches.ToList();
+                    List<KeyValuePair<Team, int>> tlist = randomizedPlannedTeamMatches.ToList();
                     tlist.Sort((x, y) => x.Value.CompareTo(y.Value));
                     int j = 0;
-                    while (!r.PlayerActiveInRound(list[j].Key))
+                    while (r.PlayerActiveInRound(list[j].Key))
                     {
                         ++j;
                     }
@@ -118,21 +196,41 @@ namespace TournamentInitiationToolSolo
                         ++k;
                     }
                     Team t = tlist[k].Key;
-                    for (int z = 0; z < r.matches.Count; ++z)
+                    for (int z = 0; z < r.matches.Length; ++z)
                     {
-                        if (r.matches.ElementAt(z).ParticipatingTeams.Count < r.matches.ElementAt(z).maxTeamsPerMatch)
+                        int cnt = r.matches.ElementAt(z).CurrentTeamCount();
+                        if (cnt < r.matches.ElementAt(z).maxTeamsPerMatch)
                         {
-                            r.matches.ElementAt(z).ParticipatingTeams.Add(t);
-                            r.matches.ElementAt(z).Agreement.Add(t, MATCH_AGREEMENT.UNREPORTED);
+                            r.matches.ElementAt(z).Agreement.Add(cnt, MATCH_AGREEMENT.UNREPORTED);
+                            r.matches.ElementAt(z).ParticipatingTeams[cnt]=t;
                             break;
                         }
                     }
                     foreach (Player pl in t.Players)
                     {
-                        plannedMatches[pl]++;
+                        for(int h=0; h<randomizedPlannedMatches.Count; ++h)
+                        {
+                            if (randomizedPlannedMatches[h].Key==pl)
+                            {
+                                var pair = randomizedPlannedMatches[h];
+                                KeyValuePair<Player, int> newPair = new KeyValuePair<Player, int>(pl, pair.Value + 1);
+                                randomizedPlannedMatches[h]= newPair;
+                                break;
+                            }
+                        }
                     }
-                    plannedTeamMatches[t]++;
+                    for(int h=0; h<randomizedPlannedTeamMatches.Count; ++h)
+                    {
+                        if (randomizedPlannedTeamMatches[h].Key == t)
+                        {
+                            var pair = randomizedPlannedTeamMatches[h];
+                            KeyValuePair<Team, int> newPair = new KeyValuePair<Team, int>(t, pair.Value + 1);
+                            randomizedPlannedTeamMatches[h]= newPair;
+                            break;
+                        }
+                    }
                 }
+                RoundData[i]=r;
             }
             SaveState();
         }
@@ -149,7 +247,7 @@ namespace TournamentInitiationToolSolo
                 {
                     if(m.finished)
                     {
-                        for (int i = 0; i < m.ParticipatingTeams.Count; ++i)
+                        for (int i = 0; i < m.CurrentTeamCount(); ++i)
                         {
                             foreach (Player p in m.ParticipatingTeams.ElementAt(i).Players)
                             {
@@ -161,26 +259,31 @@ namespace TournamentInitiationToolSolo
             }
             return result;
         }
-        public void AdminSetResultMatch(int round, int match, ConcurrentBag<double> scores)
+        public void AdminSetResultMatch(int round, int match, double[] scores)
         {
             RoundData.ElementAt(round).matches.ElementAt(match).Scores=scores;
             for(int i=0; i< RoundData.ElementAt(round).matches.ElementAt(match).Agreement.Count; ++i)
             {
-                RoundData.ElementAt(round).matches.ElementAt(match).Agreement[RoundData.ElementAt(round).matches.ElementAt(match).ParticipatingTeams.ElementAt(i)] = MATCH_AGREEMENT.AGREED;
+                RoundData.ElementAt(round).matches.ElementAt(match).Agreement[i] = MATCH_AGREEMENT.AGREED;
             }
         }
         public async void CheckCurrentRound(DiscordChannel dc)
         {
+            int backup = CurrentRound;
             for(int i=0; i<Rounds; i++)
             {
                 foreach(Match m in RoundData.ElementAt(i).matches)
                 {
-                    foreach(KeyValuePair<Team, MATCH_AGREEMENT> kvp in m.Agreement)
+                    for(int asdf =0;  asdf < m.Agreement.Count; asdf++)
                     {
-                        if(kvp.Value != MATCH_AGREEMENT.AGREED)
+                        if (m.Agreement[asdf]!= MATCH_AGREEMENT.AGREED)
                         {
                             CurrentRound = i;
                             SaveState(false);
+                            if (CurrentRound != backup)
+                            {
+                                await dc.SendMessageAsync("New Round has started:\r\n" + RoundData.ElementAt(CurrentRound).ToString());
+                            }
                             return;
                         }
                     }
@@ -190,7 +293,6 @@ namespace TournamentInitiationToolSolo
             await dc.SendMessageAsync("Tournament is over! Thanks everybody for taking part!");
             await dc.SendMessageAsync(ResultsToString(CalculatePlayerScores(), true));
             Program.Tournaments.Remove(ID, out TournamentConfig cfg);
-            Program.MasterModePerServer.Remove(ID, out var mm);
             SaveState(true);
             //All played
         }
@@ -305,11 +407,13 @@ namespace TournamentInitiationToolSolo
         {
             string[] ids = combo.Split('+');
             Team team = new Team();
-            foreach (string s in ids)
+            team.Players= new Player[ids.Length];
+            for(int i=0; i < ids.Length; ++i)
             {
-                ulong pid = Convert.ToUInt64(s);
-                team.Players.Add(Players[pid]);
+                ulong pid = Convert.ToUInt64(ids[i]);
+                team.Players[i]=Players[pid];
             }
+
             team.PlayersPerTeam = PlayersPerTeam;
             return team;
         }
@@ -317,9 +421,9 @@ namespace TournamentInitiationToolSolo
         public string GetMatchPlan()
         {
             string result = "";
-            for(int i=0; i<RoundData.Count; ++i)
+            for(int i=0; i<RoundData.Length; ++i)
             {
-                result += "\r\n\r\n\r\nRound " + i.ToString() + " : \r\n" + RoundData.ElementAt(i).ToString();
+                result += "\r\n\r\n\r\nRound " + i.ToString() + " : \r\n" + RoundData[i].ToString();
             }
             return result;
         }

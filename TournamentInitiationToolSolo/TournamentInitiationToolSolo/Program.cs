@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using DSharpPlus;
@@ -13,7 +15,6 @@ namespace TournamentInitiationToolSolo
     // We're sealing it because nothing will be inheriting this class
     public class Program
     {
-        public static ConcurrentDictionary<ulong, string> MasterModePerServer = new ConcurrentDictionary<ulong, string>();
         public static ConcurrentDictionary<ulong, TournamentConfig> Tournaments = new ConcurrentDictionary<ulong, TournamentConfig>();
         public static DiscordClient discord;
         public static CommandsNextExtension commands;
@@ -58,27 +59,36 @@ namespace TournamentInitiationToolSolo
             await Task.Delay(-1);
         }
         
-        public static LoadData()
+        public static void LoadData()
         {
-            string filePrefix = "run_";
-            string fileExtension = ".json";
-            string[] files = Directory.GetFiles(DataPath, filePrefix + "*" + fileExtension);
-            JsonSerializerOptions options = new JsonSerializerOptions
+            try
+            {
+                string filePrefix = "run_";
+                string fileExtension = ".json";
+                string[] files = Directory.GetFiles(DataPath, filePrefix + "*" + fileExtension);
+                JsonSerializerOptions options = new JsonSerializerOptions
                 {
                     ReferenceHandler = ReferenceHandler.Preserve,
                     IncludeFields = true
                 };
-            foreach (string file in files)
-            {
-                string fileName = Path.GetFileNameWithoutExtension(file);
-                fileName = fileName.Substring(filePrefix.Length);
-                ulong fileNumber;
-                if (ulong.TryParse(fileName, out fileNumber))
+                foreach (string file in files)
                 {
-                    string json= File.ReadAllText(DataPath +"\\"+file);
-                    tc = JsonSerializer.Deserialize<TournamentConfig>(json, options);
+                    string fileName = Path.GetFileNameWithoutExtension(file);
+                    fileName = fileName.Substring(filePrefix.Length);
+                    ulong fileNumber;
+                    if (ulong.TryParse(fileName, out fileNumber))
+                    {
+                        string json = File.ReadAllText(file);
+                        var tc = JsonSerializer.Deserialize<TournamentConfig>(json, options);
+                        if (!Tournaments.ContainsKey(tc.ID)) Tournaments.TryAdd(tc.ID, tc);
+                    }
                 }
             }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.ToString());
+            }
+            
         }
     }
     public enum MATCH_AGREEMENT { UNREPORTED, AGREED, DISPUTE}
