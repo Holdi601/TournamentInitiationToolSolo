@@ -494,6 +494,7 @@ namespace TournamentInitiationToolSolo
                             }
                             Program.Tournaments[sid].AdminSetResultMatch(Program.Tournaments[sid].SetResultRound, Program.Tournaments[sid].SetResultMatch, newResults);
                             Program.Tournaments[sid].SetResultStep = -1;
+                            Program.Tournaments[sid].CheckCurrentRound(e.Channel);
                             await e.Channel.SendMessageAsync("Results have been changed");
                         }
                         else
