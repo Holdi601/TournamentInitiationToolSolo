@@ -92,6 +92,19 @@ namespace TournamentInitiationToolSolo
             }
         }
 
+        [Command("VoiceManager")]
+        public async Task VoiceManager(CommandContext ctx)
+        {
+            ulong serverID = ctx.Guild.Id;
+            if (Program.Tournaments.ContainsKey(serverID)
+                && Program.Tournaments[serverID].MasterMode == "CollectPlayers"
+                && Program.Tournaments[serverID].Initiator==ctx.User.Id)
+            {
+                Program.Tournaments[serverID].VoiceChannelManagement = !Program.Tournaments[serverID].VoiceChannelManagement;
+                await ctx.Channel.SendMessageAsync("The Voice Messenger is now on? " + Program.Tournaments[serverID].VoiceChannelManagement);
+            }
+        }
+
         [Command("CurrentRanking")]
         public async Task CurrentRanking(CommandContext ctx)
         {
@@ -144,13 +157,22 @@ namespace TournamentInitiationToolSolo
             DateTime now = DateTime.UtcNow;
             if (Program.Tournaments.ContainsKey(serverID) && Program.Tournaments[serverID].Initiator == ctx.User.Id)
             {
+                if (Program.Tournaments[serverID].VoiceChannelManagement)
+                {
+                    await Program.Tournaments[serverID].DeleteVoiceChannelsAsync(ctx.Guild);
+                }
                 Program.Tournaments.TryRemove(serverID, out var tournaments);
+                
             }
             else if (Program.Tournaments.ContainsKey(serverID) &&
                 (now - Program.Tournaments[serverID].InitTime).Minutes > 15 &&
                     (Program.Tournaments[serverID].MasterMode != "Live" &&
                     Program.Tournaments[serverID].MasterMode != "CollectPlayers"))
             {
+                if (Program.Tournaments[serverID].VoiceChannelManagement)
+                {
+                    await Program.Tournaments[serverID].DeleteVoiceChannelsAsync(ctx.Guild);
+                }
                 Program.Tournaments.TryRemove(serverID, out var tournaments);
             }
             await ctx.RespondAsync("Tournament Ended");
@@ -173,6 +195,10 @@ namespace TournamentInitiationToolSolo
                     Program.Tournaments[serverID].Players[ctx.User.Id].Name = ctx.User.Username;
                     Player p = Program.Tournaments[serverID].Players[ctx.User.Id];
                     await ctx.RespondAsync("User " + ctx.User.Username + " added to the Roster");
+                    if (Program.Tournaments[serverID].VoiceChannelManagement)
+                    {
+                        await ctx.RespondAsync("Hey " + ctx.User.Username + ", please consider joining the T_Lobby voice channel. You will be put automatically into every team voice channel when necessary");
+                    }
                 }
             }
             else
@@ -433,8 +459,27 @@ namespace TournamentInitiationToolSolo
                             }
                             else
                             {
-                                Program.Tournaments[sid].MasterMode = "CollectPlayers";
+                                Program.Tournaments[sid].MasterMode = "CollectVoice";
                                 await sender.SendMessageAsync(e.Channel, "Rounds is set to " + Program.Tournaments[sid].Rounds);
+                                await sender.SendMessageAsync(e.Channel, "Do you want to have voice channels available and the bot moving players into the right voice channel for their matches? (y/n)");
+                            }
+                            break;
+                        case "CollectVoice":
+                            if(num.ToLower() == "y" || num.ToLower() == "yes"||
+                                num.ToLower() == "n" || num.ToLower() == "no")
+                            {
+                                if (num.ToLower() == "y" || num.ToLower() == "yes")
+                                {
+                                    Program.Tournaments[sid].VoiceChannelManagement = true;
+                                    await sender.SendMessageAsync(e.Channel, "VoiceManager is active");
+                                    await Program.Tournaments[sid].PrepareVoiceChannelsAsync(e.Guild);
+                                }
+                                else
+                                {
+                                    Program.Tournaments[sid].VoiceChannelManagement = false;
+                                    await sender.SendMessageAsync(e.Channel, "VoiceManager is off");
+                                }
+                                Program.Tournaments[sid].MasterMode = "CollectPlayers";
                                 await sender.SendMessageAsync(e.Channel, "Every player that wants to participate needs to use the command RegisterMe. If the admin is happy execute the command GoLive");
                             }
                             break;

@@ -7,6 +7,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using DSharpPlus.CommandsNext;
+using DSharpPlus;
+using System.Diagnostics.Metrics;
 
 namespace TournamentInitiationToolSolo
 {
@@ -44,6 +47,84 @@ namespace TournamentInitiationToolSolo
         public int SetResultRound = -1;
         public int SetResultMatch = -1;
         public string MasterMode = "";
+        public bool VoiceChannelManagement = false;
+        public ulong VoiceChannel_Lobby = 0;
+        public ulong[] VoiceChannel_Teams = null;
+        public ulong VoiceChannel_Backup = 0;
+
+        public async Task PrepareVoiceChannelsAsync(DiscordGuild ctx)
+        {
+
+            var DCS = await ctx.GetChannelsAsync();
+            foreach(var channel in DCS)
+            {
+                if(channel.Type== DSharpPlus.ChannelType.Voice)
+                {
+                    VoiceChannel_Backup = channel.Id;
+                    break;
+                }
+            }
+            DiscordChannel lobby = await ctx.CreateChannelAsync("T_Lobby", DSharpPlus.ChannelType.Voice);
+            VoiceChannel_Lobby = lobby.Id;
+            int numberOfChannelsNeeded = MatchesPerPlayDay * TeamsPerMatch;
+            VoiceChannel_Teams = new ulong[numberOfChannelsNeeded];
+            for(int i = 0; i < numberOfChannelsNeeded; ++i)
+            {
+                DiscordChannel tChannel = await ctx.CreateChannelAsync("T_" + i.ToString(), DSharpPlus.ChannelType.Voice);
+                VoiceChannel_Teams[i]= tChannel.Id;
+            }
+        }
+
+        public async Task MovePlayerToChannel(DiscordChannel ctx, ulong ply, ulong chnnl)
+        {
+            var channels = await ctx.Guild.GetChannelsAsync();
+            DiscordChannel chnl = ctx.Guild.GetChannel(chnnl);
+            foreach(DiscordChannel dc in channels)
+            {
+                if(dc.Type == ChannelType.Voice)
+                {
+                    bool found=false;
+                    foreach(var usr in dc.Users)
+                    {
+                        if(usr.Id == ply)
+                        {
+                            await usr.ModifyAsync(x => x.VoiceChannel = chnl);
+                        }
+                    }
+                    if (found) break;
+                }
+            }
+        }
+
+        public async Task DeleteVoiceChannelsAsync(DiscordGuild ctx)
+        {
+            DiscordChannel tgt = ctx.GetChannel(VoiceChannel_Backup);
+            for(int i=0; i<VoiceChannel_Teams.Length; ++i)
+            {
+                DiscordChannel src = ctx.GetChannel(VoiceChannel_Teams[i]);
+                await MoveAllVoiceChannelPeopleTo(src, tgt);
+                await tgt.DeleteAsync();
+            }
+
+        }
+
+        public async Task MoveAllVoiceChannelPeopleTo(DiscordChannel source, DiscordChannel target)
+        {
+            DiscordGuild guild = source.Guild;
+
+            // Get the target voice channel
+            DiscordChannel targetChannel = target;
+
+            // Loop through all voice channels in the guild
+            foreach (DiscordChannel voiceChannel in guild.Channels.Values.Where(c => c.Type == ChannelType.Voice))
+            {
+                // Loop through all users in the voice channel and move them to the target channel
+                foreach (DiscordMember member in voiceChannel.Users)
+                {
+                    await member.ModifyAsync(x => x.VoiceChannel = targetChannel);
+                }
+            }
+        }
 
         public void SaveState(bool final=false)
         {
@@ -267,6 +348,22 @@ namespace TournamentInitiationToolSolo
                 RoundData.ElementAt(round).matches.ElementAt(match).Agreement[i] = MATCH_AGREEMENT.AGREED;
             }
         }
+        public void MovePlayersIntoTheRightChannel(DiscordChannel channel)
+        {
+            Round r = RoundData[CurrentRound];
+            int channelNum = 0;
+            for(int i=0; i<r.matches.Length;  ++i)
+            {
+                for(int j=0; j< r.matches[i].ParticipatingTeams.Length; ++j)
+                {
+                    for(int k=0; k< r.matches[i].ParticipatingTeams[j].Players.Length; ++k)
+                    {
+                        MovePlayerToChannel(channel, r.matches[i].ParticipatingTeams[j].Players[k].ID, VoiceChannel_Teams[channelNum]);
+                    }
+                    channelNum++;
+                }
+            }
+        }
         public async void CheckCurrentRound(DiscordChannel dc)
         {
             int backup = CurrentRound;
@@ -283,12 +380,17 @@ namespace TournamentInitiationToolSolo
                             if (CurrentRound != backup)
                             {
                                 await dc.SendMessageAsync("New Round has started:\r\n" + RoundData.ElementAt(CurrentRound).ToString());
+                                MovePlayersIntoTheRightChannel(dc);
                             }
                             return;
                         }
                     }
                     m.finished = true;
                 }
+            }
+            if(VoiceChannelManagement)
+            {
+                await DeleteVoiceChannelsAsync(dc.Guild);
             }
             await dc.SendMessageAsync("Tournament is over! Thanks everybody for taking part!");
             await dc.SendMessageAsync(ResultsToString(CalculatePlayerScores(), true));
